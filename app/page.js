@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { generarMultiplesSeries } from '@/lib/generadorBingo';
+import { generarSeriesEnChunks } from '@/lib/generadorBingo';
 import { generarMultiplesPDFs } from '@/lib/generadorPDF';
 import { MODOS_GENERACION } from '@/lib/configCartones';
 import { verificarCredenciales, guardarSesion, cerrarSesion, verificarSesion } from '@/lib/auth';
@@ -24,6 +24,7 @@ export default function Home() {
   const [generando, setGenerando] = useState(false);
   const [progreso, setProgreso] = useState(0);
   const [mensaje, setMensaje] = useState('');
+  const [detalleProgreso, setDetalleProgreso] = useState(null);
   const [pdfsGenerados, setPdfsGenerados] = useState([]);
   const [generaciones, setGeneraciones] = useState([]);
   const [mostrarHistorial, setMostrarHistorial] = useState(false);
@@ -37,13 +38,11 @@ export default function Home() {
   const [reporteAuditoria, setReporteAuditoria] = useState(null);
   const [mostrarAuditoria, setMostrarAuditoria] = useState(false);
 
-  // Verificar sesión y cargar datos al iniciar
   useEffect(() => {
     const sesionValida = verificarSesion();
     setAutenticado(sesionValida);
     setVerificandoSesion(false);
     
-    // Cargar generaciones y estadísticas desde Supabase
     if (sesionValida) {
       cargarDatos();
     }
@@ -115,7 +114,6 @@ export default function Home() {
     }
   };
 
-  // Mostrar loading mientras verifica sesión
   if (verificandoSesion) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
@@ -127,17 +125,16 @@ export default function Home() {
     );
   }
 
-  // Mostrar login si no está autenticado
   if (!autenticado) {
     return <LoginForm onLoginExitoso={handleLogin} />;
   }
 
   const colores = [
-    { nombre: 'Naranja', valor: '#E65100' },  // Naranja más oscuro y fuerte
-    { nombre: 'Azul', valor: '#1976D2' },      // Azul más oscuro (era celeste)
+    { nombre: 'Naranja', valor: '#E65100' },
+    { nombre: 'Azul', valor: '#1976D2' },
     { nombre: 'Negro', valor: '#2E2E2E' },
-    { nombre: 'Verde', valor: '#2E7D32' },     // Verde más oscuro y fuerte
-    { nombre: 'Rojo', valor: '#D32F2F' },      // Rojo fuerte (era rosa)
+    { nombre: 'Verde', valor: '#2E7D32' },
+    { nombre: 'Rojo', valor: '#D32F2F' },
     { nombre: 'Morado', valor: '#9C27B0' },
   ];
 
@@ -149,22 +146,36 @@ export default function Home() {
 
     setGenerando(true);
     setProgreso(0);
-    setMensaje('Generando cartones únicos...');
+    setMensaje('Iniciando generación...');
+    setDetalleProgreso(null);
     setPdfsGenerados([]);
 
     try {
-      const series = await generarMultiplesSeries(
+      const series = await generarSeriesEnChunks(
         cantidadSeries,
         modoColor,
         [colorSeleccionado],
         serieInicial,
         modoGeneracion,
         nombreCliente || null,
-        notasPedido || null
+        notasPedido || null,
+        (info) => {
+          setProgreso(info.progreso);
+          setDetalleProgreso(info);
+          
+          if (info.fase === 'registro') {
+            setMensaje('📝 Registrando generación...');
+          } else if (info.fase === 'generando') {
+            setMensaje(`🎲 Generando cartones únicos... (Serie ${info.serieActual}/${info.totalSeries})`);
+          } else if (info.fase === 'guardando') {
+            setMensaje(`💾 Guardando en base de datos... (${info.cartones} cartones)`);
+          } else if (info.fase === 'completado') {
+            setMensaje('✅ Cartones generados! Creando PDFs...');
+          }
+        }
       );
 
-      setProgreso(50);
-      setMensaje('Creando archivos PDF...');
+      setMensaje('📄 Creando archivos PDF...');
 
       const opciones = {
         marcaAgua: marcaAgua,
@@ -177,8 +188,8 @@ export default function Home() {
       setMensaje(`✅ ¡Listo! ${cantidadSeries} series generadas (${cantidadSeries * 6} cartones)`);
       
       setPdfsGenerados(pdfs);
+      setDetalleProgreso(null);
       
-      // Recargar generaciones y estadísticas
       await cargarDatos();
       
       setGenerando(false);
@@ -189,6 +200,7 @@ export default function Home() {
       setMensaje('❌ Error al generar cartones. Intenta de nuevo.');
       setGenerando(false);
       setProgreso(0);
+      setDetalleProgreso(null);
     }
   };
 
@@ -220,9 +232,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
       <div className="max-w-6xl mx-auto">
-        {/* HEADER CON LOGO */}
         <div className="text-center mb-8 relative">
-          {/* Botón de cerrar sesión - Responsive */}
           <button
             onClick={handleLogout}
             className="absolute top-0 right-0 px-3 py-2 md:px-4 md:py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition shadow-lg flex items-center gap-1 md:gap-2 text-xs md:text-base"
@@ -234,7 +244,6 @@ export default function Home() {
             <span className="sm:hidden">Salir</span>
           </button>
 
-          {/* Logo icon.png */}
           <div className="flex justify-center mb-4">
             <img 
               src="/icon.png" 
@@ -251,10 +260,8 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* PANEL IZQUIERDO: Configuración */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-2xl shadow-xl p-8">
-              {/* Modo de generación */}
               <div className="mb-6 p-4 bg-yellow-50 border-2 border-yellow-200 rounded-lg">
                 <label className="block text-gray-700 font-semibold mb-3">
                   🎯 Modo de Generación
@@ -314,7 +321,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Serie inicial y cantidad */}
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="block text-gray-700 font-semibold mb-2">
@@ -349,7 +355,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* NUEVO: Cliente y Notas */}
               <div className="mb-6 p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
                 <label className="block text-gray-700 font-semibold mb-2">
                   👤 Cliente / Pedido (Opcional)
@@ -375,7 +380,6 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* Marca de agua personalizable */}
               <div className="mb-6 p-4 bg-purple-50 border-2 border-purple-200 rounded-lg">
                 <label className="block text-gray-700 font-semibold mb-2">
                   💧 Marca de Agua
@@ -393,7 +397,6 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* Copias por cartón (solo para modo rondas) */}
               {modoGeneracion === MODOS_GENERACION.RONDAS && (
                 <div className="mb-6 p-4 bg-green-50 border-2 border-green-200 rounded-lg">
                   <label className="block text-gray-700 font-semibold mb-2">
@@ -420,7 +423,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Modo de color */}
               <div className="mb-6">
                 <label className="block text-gray-700 font-semibold mb-2">
                   Modo de Color
@@ -451,7 +453,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Selector de color */}
               {modoColor === 'fijo' && (
                 <div className="mb-6">
                   <label className="block text-gray-700 font-semibold mb-3">
@@ -480,20 +481,26 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Barra de progreso */}
               {generando && (
                 <div className="mb-6">
-                  <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                  <div className="w-full bg-gray-200 rounded-full h-6 overflow-hidden relative">
                     <div
-                      className="bg-blue-500 h-full transition-all duration-300"
+                      className="bg-gradient-to-r from-blue-500 to-indigo-600 h-full transition-all duration-300 flex items-center justify-center"
                       style={{ width: `${progreso}%` }}
-                    />
+                    >
+                      <span className="text-white text-xs font-bold">{progreso}%</span>
+                    </div>
                   </div>
-                  <p className="text-center text-gray-600 mt-2">{mensaje}</p>
+                  <p className="text-center text-gray-700 mt-2 font-medium">{mensaje}</p>
+                  
+                  {detalleProgreso && detalleProgreso.chunk && (
+                    <div className="mt-2 text-center text-sm text-gray-600">
+                      Procesando lote {detalleProgreso.chunk} de {detalleProgreso.totalChunks}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Mensaje */}
               {mensaje && !generando && (
                 <div className={`mb-6 p-4 rounded-lg ${
                   mensaje.includes('✅') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -502,7 +509,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Botón generar */}
               <button
                 onClick={handleGenerar}
                 disabled={generando}
@@ -512,12 +518,11 @@ export default function Home() {
                     : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg'
                 }`}
               >
-                {generando ? 'Generando...' : '🎲 Generar Cartones'}
+                {generando ? '⏳ Generando...' : '🎲 Generar Cartones'}
               </button>
             </div>
           </div>
 
-          {/* PANEL DERECHO: PDFs generados */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl shadow-xl p-6 sticky top-4">
               <h3 className="text-xl font-bold text-gray-800 mb-4">
@@ -586,22 +591,19 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Info y Estadísticas */}
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Info del sistema */}
           <div className="p-6 bg-white rounded-2xl shadow-xl">
             <h3 className="font-semibold text-gray-700 mb-3">📋 Información:</h3>
             <ul className="text-sm text-gray-600 space-y-2">
               <li>✅ Cartones únicos garantizados</li>
               <li>✅ Guardados en base de datos</li>
-              <li>✅ PDFs divididos automáticamente</li>
+              <li>✅ Generación optimizada en lotes</li>
+              <li>✅ Procesamiento sin congelar interfaz</li>
               <li>✅ Múltiples modos de generación</li>
-              <li>✅ Serie inicial personalizable</li>
               <li>✅ Descarga individual o masiva</li>
             </ul>
           </div>
 
-          {/* Estadísticas */}
           <div className="p-6 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-2xl shadow-xl">
             <h3 className="font-semibold text-gray-700 mb-3">📊 Estadísticas Totales:</h3>
             <div className="space-y-3">
@@ -621,7 +623,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* VERIFICADOR DE CARTONES */}
         <div className="mt-6 bg-white rounded-2xl shadow-xl p-6">
           <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             🔍 Verificar Cartón
@@ -630,7 +631,7 @@ export default function Home() {
             Verifica si un cartón existe en la base de datos. Útil para atención al cliente.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <input
               type="number"
               placeholder="Número de Serie"
@@ -645,13 +646,6 @@ export default function Home() {
               onChange={(e) => setNumeroCartonBuscar(e.target.value)}
               className="px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none"
             />
-            <input
-              type="text"
-              placeholder="Cliente (opcional)"
-              value={nombreCliente}
-              onChange={(e) => setNombreCliente(e.target.value)}
-              className="px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none"
-            />
             <button
               onClick={buscarCartonEnBD}
               disabled={buscandoCarton}
@@ -665,7 +659,6 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Resultado de búsqueda */}
           {resultadoBusqueda && (
             <div className={`mt-4 p-4 rounded-lg ${
               resultadoBusqueda.encontrado 
@@ -717,7 +710,6 @@ export default function Home() {
           )}
         </div>
 
-        {/* AUDITORÍA DE CALIDAD */}
         <div className="mt-6 bg-gradient-to-br from-red-50 to-orange-50 rounded-2xl shadow-xl p-6 border-2 border-orange-200">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -741,10 +733,8 @@ export default function Home() {
             </button>
           </div>
 
-          {/* Resultado de auditoría */}
           {reporteAuditoria && mostrarAuditoria && (
             <div className="mt-4 space-y-4">
-              {/* Resumen */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-white rounded-lg p-4 shadow">
                   <div className="text-sm text-gray-600">Total Cartones</div>
@@ -764,7 +754,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Cartones duplicados */}
               {reporteAuditoria.duplicados.length > 0 && (
                 <div className="bg-white rounded-lg p-4 shadow">
                   <h4 className="font-bold text-red-800 mb-3 flex items-center gap-2">
@@ -782,7 +771,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Cartones con errores */}
               {reporteAuditoria.cartonesConError.length > 0 && (
                 <div className="bg-white rounded-lg p-4 shadow">
                   <h4 className="font-bold text-orange-800 mb-3 flex items-center gap-2">
@@ -811,7 +799,6 @@ export default function Home() {
                 </div>
               )}
 
-              {/* Todo OK */}
               {reporteAuditoria.errores === 0 && reporteAuditoria.duplicados.length === 0 && (
                 <div className="bg-green-100 border-2 border-green-300 rounded-lg p-6 text-center">
                   <span className="text-6xl mb-4 block">✅</span>
@@ -827,7 +814,6 @@ export default function Home() {
           )}
         </div>
 
-        {/* HISTORIAL DE GENERACIONES (desde BD) */}
         {generaciones.length > 0 && (
           <div className="mt-6 bg-white rounded-2xl shadow-xl p-6">
             <div className="flex items-center justify-between mb-4">
@@ -844,7 +830,7 @@ export default function Home() {
             </div>
 
             <div className={`space-y-4 ${mostrarHistorial ? 'max-h-[800px]' : 'max-h-[400px]'} overflow-y-auto`}>
-              {generaciones.map((gen, idx) => {
+              {generaciones.map((gen) => {
                 const fecha = new Date(gen.fecha_generacion);
                 const fechaFormato = fecha.toLocaleDateString('es-AR', {
                   day: '2-digit',
@@ -856,7 +842,6 @@ export default function Home() {
                   minute: '2-digit'
                 });
 
-                // Traducir modo de generación
                 const modoTexto = {
                   'normal': '📋 Normal (6 cartones)',
                   'rondas': '🔄 Rondas',
@@ -929,10 +914,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* FOOTER PROFESIONAL */}
         <footer className="mt-8 bg-gradient-to-r from-gray-800 to-gray-900 rounded-2xl shadow-2xl p-8 text-white">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {/* Columna 1: Sobre nosotros */}
             <div>
               <div className="flex items-center gap-3 mb-4">
                 <img 
@@ -947,7 +930,6 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Columna 2: Contacto */}
             <div>
               <h4 className="text-lg font-bold mb-4">📞 Contacto</h4>
               <ul className="space-y-3 text-sm">
@@ -974,7 +956,6 @@ export default function Home() {
               </ul>
             </div>
 
-            {/* Columna 3: Redes Sociales */}
             <div>
               <h4 className="text-lg font-bold mb-4">🌐 Redes Sociales</h4>
               <div className="space-y-3">
@@ -1015,7 +996,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Copyright */}
           <div className="mt-8 pt-6 border-t border-gray-700 text-center">
             <p className="text-sm text-gray-400">
               © {new Date().getFullYear()} Bingol - Generador de Cartones de Bingo. Todos los derechos reservados.
@@ -1026,11 +1006,9 @@ export default function Home() {
           </div>
         </footer>
 
-        {/* MODAL DE PREVIEW PDF */}
         {pdfPreview && (
           <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col">
-              {/* Header del modal */}
               <div className="flex items-center justify-between p-4 border-b">
                 <h3 className="font-bold text-gray-800">{pdfPreview.filename}</h3>
                 <div className="flex gap-2">
@@ -1050,7 +1028,6 @@ export default function Home() {
                 </div>
               </div>
               
-              {/* Iframe con el PDF */}
               <div className="flex-1 overflow-hidden">
                 <iframe
                   src={pdfPreview.url}
